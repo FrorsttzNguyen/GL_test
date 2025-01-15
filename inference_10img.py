@@ -2,10 +2,11 @@ import os
 import torch
 import time
 import numpy as np
-from datasets.single_crowd import Crowd
-from models.vgg import vgg19
 import argparse
 import matplotlib.pyplot as plt
+from memory_check import check_memory, check_cpu_memory
+from datasets.single_crowd import Crowd
+from models.vgg import vgg19
 from scipy.ndimage import gaussian_filter
 
 
@@ -85,6 +86,9 @@ if __name__ == '__main__':
 
     model.to(args.device)
     model.eval()
+    
+    # check_memory(model, args.device)
+    check_cpu_memory()
 
     for idx, image_path in enumerate(selected_images[:10]):
         print(f"Processing image {idx + 1}/10: {image_path}")
@@ -99,11 +103,16 @@ if __name__ == '__main__':
         for img, gt_points, name in dataloader:
             img = img.to(args.device)
             with torch.no_grad():
+                # check_memory(model, args.device) #before inference
+                check_cpu_memory()
+                
                 outputs = model(img)
                 density_map = outputs.squeeze(0).squeeze(0).cpu().numpy()
                 print(f"Inference completed for image: {name[0]}")
+                
+                # check_memory(model, args.device) # after inference
+                check_cpu_memory()
 
-    
             density_map_smooth = gaussian_filter(density_map, sigma= 1)
             print(f"Density map shape: {density_map_smooth.shape}")
             print(f"Min value: {density_map_smooth.min().item()}, Max value: {density_map_smooth.max().item()}")
