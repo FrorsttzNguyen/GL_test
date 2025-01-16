@@ -145,4 +145,4 @@ if __name__ == '__main__':
 # checkpoint_path = /media/eyecode/data/hien/GL_checkpoint/ucf_vgg19_ot_84.pth
 # # save_dir = /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_real
 # /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/ucf_processed_img
-# python3 inference_10img.py --data-dir /media/eyecode/data/hien/ucf_data/UCF-QNRF_ECCV18/processing --checkpoint-path /media/eyecode/data/hien/GL_checkpoint/ucf_vgg19_ot_84.pth
+#sh : python3 inference_10img.py --data_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/ucf_processed_img --checkpoint_path /media/eyecode/data/hien/GL_checkpoint/ucf_vgg19_ot_84.pth --save_density_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_ucf --save_pth_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_ucf --device cuda:1
