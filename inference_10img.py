@@ -4,11 +4,11 @@ import time
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
+from OT_M.otm import den2seq    
 from memory_check import check_memory, check_cpu_memory
 from datasets.single_crowd import Crowd
 from models.vgg import vgg19
 from scipy.ndimage import gaussian_filter
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Inference for multiple preprocessed images')
@@ -19,7 +19,6 @@ def parse_args():
     parser.add_argument('--device', default='cuda', help='Device to run inference (cuda or cpu)')
     args = parser.parse_args()
     return args
-
 
 def save_density_map_as_image(density_map, point_map, save_path):
     """
@@ -38,7 +37,6 @@ def save_density_map_as_image(density_map, point_map, save_path):
         gt_points = None
         ground_truth_count = 0
         print(f"Ground truth point map not found: {point_map}")
-
     # Visualize and save the density map as an image
     plt.figure(figsize=(10, 10))
     plt.imshow(density_map, cmap='jet')  # Use 'jet' colormap
@@ -52,7 +50,6 @@ def save_density_map_as_image(density_map, point_map, save_path):
     print(f'Estimated people count: {estimated_people_count}')
     print(f'Ground truth people count: {ground_truth_count}')
 
-
 def save_density_map_as_tensor(density_map, save_path):
     """
     Save the predicted density map as a .pth file.
@@ -60,36 +57,39 @@ def save_density_map_as_tensor(density_map, save_path):
     torch.save(torch.tensor(density_map), save_path)
     print(f'Density map (tensor) saved at: {save_path}')
 
+def normalize_density_map(density_map):
+    """
+    Normalize the density map to the range [0, 1].
+    """
+    min_val = density_map.min()
+    max_val = density_map.max()
+    if max_val > min_val:
+        density_map = (density_map - min_val) / (max_val - min_val)
+    else:
+        density_map = np.zeros_like(density_map)  # Handle edge case where all values are the same
+    return density_map
 
 if __name__ == '__main__':
     total_start_time = time.time()  
     args = parse_args()
-
     all_images = sorted(os.listdir(args.data_dir))
-
     selected_images = [os.path.join(args.data_dir, img) for idx, img in enumerate(all_images) if idx % 2 == 0]
     print(f"Selected images: {selected_images[:10]}") 
-
     selected_npy = [os.path.join(args.data_dir, npy) for idx, npy in enumerate(all_images) if idx % 2 != 0]
     print(f"Selected pointmap: {selected_npy[:10]}") 
-
+    
     # Load the model
     model = vgg19()
     checkpoint = torch.load(args.checkpoint_path, map_location=args.device)
     model.load_state_dict(checkpoint, strict=False)
-
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     print(f'Total param: {total_params}')
     print(f'Trainable param : {trainable_params}')
-
     model.to(args.device)
     model.eval()
     
-    # check_memory(model, args.device)
     check_cpu_memory()
-
     for idx, image_path in enumerate(selected_images[:10]):
         print(f"Processing image {idx + 1}/10: {image_path}")
         start_time = time.time()
@@ -99,37 +99,42 @@ if __name__ == '__main__':
         
         dataset = Crowd(image_path, crop_size=512, downsample_ratio=8, method='val')
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
-
         for img, gt_points, name in dataloader:
             img = img.to(args.device)
             with torch.no_grad():
-                # check_memory(model, args.device) #before inference
                 check_cpu_memory()
                 
                 outputs = model(img)
                 density_map = outputs.squeeze(0).squeeze(0).cpu().numpy()
                 print(f"Inference completed for image: {name[0]}")
                 
-                # check_memory(model, args.device) # after inference
                 check_cpu_memory()
-
-            density_map_smooth = gaussian_filter(density_map, sigma= 1)
+            density_map_smooth = gaussian_filter(density_map, sigma=1)
+            
+            # Chuẩn hóa density_map về khoảng [0, 1]
+            density_map_smooth = normalize_density_map(density_map_smooth)
+            
+            # Điều chỉnh tổng giá trị để phù hợp với Sample Denmap
+            target_sum = 368.19  # Tổng giá trị của Sample Denmap
+            density_map_smooth = density_map_smooth * (target_sum / density_map_smooth.sum())
+            
+            # Giới hạn giá trị cực đại để phù hợp với Sample Denmap
+            max_value_limit = 0.0144  # Giá trị cực đại của Sample Denmap
+            density_map_smooth = np.clip(density_map_smooth, a_min=0, a_max=max_value_limit)
+            
             print(f"Density map shape: {density_map_smooth.shape}")
-            print(f"Min value: {density_map_smooth.min().item()}, Max value: {density_map_smooth.max().item()}")
-            print(f"Sum of density map: {density_map_smooth.sum().item()}")
-
+            print(f"Min value: {density_map_smooth.min()}, Max value: {density_map_smooth.max()}")
+            print(f"Sum of density map: {density_map_smooth.sum()}")
+            print(f'')
 
             image_name = os.path.basename(image_path).replace('.jpg', '')
             density_image_path = os.path.join(args.save_density_dir, f"{image_name}_density.png")
             density_pth_path = os.path.join(args.save_pth_dir, f"{image_name}_density.pth")
-
             save_density_map_as_image(density_map_smooth, point_map_path, density_image_path)
             save_density_map_as_tensor(density_map_smooth, density_pth_path)
-
             if gt_points is not None:
                 print(f"Ground truth points: {len(gt_points)}")
                 print(f"Ground truth file: {name[0]}")
-
             break 
         
         end_time = time.time() 
@@ -140,9 +145,3 @@ if __name__ == '__main__':
     total_elapsed_time = total_end_time - total_start_time
     print(f"\nTotal time taken for the program: {total_elapsed_time:.2f} seconds")
     print("Processing for all 10 selected images completed!")
-
-# folder_path = /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/real_process_img
-# checkpoint_path = /media/eyecode/data/hien/GL_checkpoint/ucf_vgg19_ot_84.pth
-# # save_dir = /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_real
-# /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/ucf_processed_img
-#sh : python3 inference_10img.py --data_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/ucf_processed_img --checkpoint_path /media/eyecode/data/hien/GL_checkpoint/ucf_vgg19_ot_84.pth --save_density_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_ucf --save_pth_dir /home/eyecode-hien/GeneralizedLoss-Counting-Pytorch/generated_denmap_ucf --device cuda:1
